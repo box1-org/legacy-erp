@@ -1,0 +1,15 @@
+#!/bin/sh
+# First provisioning initialises the ledger and writes a marker on the volume.
+# Later boots only repair layout, ownership and SELinux labels.
+set -eu
+ROOT=/var/srv/box1-erp
+MARKER=$ROOT/.box1-initialized
+mountpoint -q "$ROOT" || { echo "$ROOT is not mounted; refusing" >&2; exit 2; }
+if [ -e "$MARKER" ]; then
+  /usr/libexec/box1-erp/provision-data-volume.sh
+else
+  /usr/libexec/box1-erp/provision-data-volume.sh --init-ledger
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$MARKER"
+  echo "First provisioning: ledger initialised"
+fi
+restorecon -R "$ROOT"

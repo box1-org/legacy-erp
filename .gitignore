@@ -1,1 +1,3 @@
 local/output/
+# box1-ops-erp-simulator source for the image build (CI fetches it; local/build-local.sh clones it)
+erp-src/

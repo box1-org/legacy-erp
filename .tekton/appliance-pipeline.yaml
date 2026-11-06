@@ -1,0 +1,415 @@
+# legacy-erp-appliance: the one release pipeline for the legacy ERP appliance
+# (box1-docs#25). A push to main in EITHER repository runs it:
+#   - box1-org/legacy-erp            .tekton/release.yaml  (pipelineRef by name)
+#   - box1-org/box1-ops-erp-simulator .tekton/release.yaml (PaC remote annotation
+#     pointing at this file on legacy-erp main)
+# The triggering repository passes its own commit; the other is passed as "main"
+# and resolved to a commit once, at the start, so every task uses the same pair.
+#
+#   resolve  - commits for both repositories
+#   erp-test - ruff + pytest of box1-ops-erp-simulator against its pinned contracts
+#   build    - OS image box1-ci/legacy-erp@digest, with the ERP built from source
+#   security - TPA SBOM + ACS scan (box1-security-gates, observe)
+#   disk     - containerDisk box1-ci/legacy-erp-disk (box1-bootc-disk)
+#   current  - skip promotion if either main moved meanwhile (a newer run promotes)
+#   promote  - box1-workloads-dev PR recording the OS digest, merged and synced
+#   channel  - box1-ci/legacy-erp:development -> digest
+#   deploy   - `bootc upgrade --apply` in the VM; booted digest, target and units checked
+#   smoke    - Argo, VM and guest agent state
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: legacy-erp-appliance
+spec:
+  params:
+  - name: os-revision
+    type: string
+    description: box1-org/legacy-erp commit, or "main".
+  - name: erp-revision
+    type: string
+    description: box1-org/box1-ops-erp-simulator commit, or "main".
+  - name: git-auth-secret
+    type: string
+  - name: security-gates
+    type: string
+    default: observe
+  tasks:
+  - name: resolve
+    retries: 1   # PAC can briefly create the run before its git auth Secret.
+    params:
+    - name: os-revision
+      value: "$(params.os-revision)"
+    - name: erp-revision
+      value: "$(params.erp-revision)"
+    - name: git-auth-secret
+      value: "$(params.git-auth-secret)"
+    taskSpec:
+      params:
+      - name: os-revision
+      - name: erp-revision
+      - name: git-auth-secret
+      results:
+      - name: os-revision
+      - name: erp-revision
+      steps:
+      - name: resolve
+        image: registry.access.redhat.com/ubi10/python-312-minimal@sha256:7a3ccd58d8a660d782e8705585aaea2ffe2f2a5d3285507a265dae7d0302b233
+        computeResources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 128Mi}
+        env:
+        - name: OS_REVISION
+          value: "$(params.os-revision)"
+        - name: ERP_REVISION
+          value: "$(params.erp-revision)"
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: "$(params.git-auth-secret)"
+              key: git-provider-token
+        script: |
+          #!/usr/bin/env python3
+          import json, os, re, urllib.request
+          def head(repo):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/commits/main',
+                  headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)['sha']
+          out={}
+          for key,repo,result in [('OS_REVISION','box1-org/legacy-erp','os-revision'),
+                                  ('ERP_REVISION','box1-org/box1-ops-erp-simulator','erp-revision')]:
+              value=os.environ[key]
+              sha=head(repo) if value=='main' else value
+              assert re.fullmatch('[a-f0-9]{40}',sha), result+' must be a 40-character commit or main'
+              out[result]=sha
+              open('/tekton/results/'+result,'w').write(sha)
+              print(repo+' '+sha+(' (main)' if value=='main' else ' (trigger)'))
+  - name: erp-test
+    runAfter: [resolve]
+    params:
+    - name: revision
+      value: "$(tasks.resolve.results.erp-revision)"
+    - name: git-auth-secret
+      value: "$(params.git-auth-secret)"
+    taskSpec:
+      params:
+      - name: revision
+      - name: git-auth-secret
+      volumes:
+      - name: workspace
+        emptyDir: {}
+      stepTemplate:
+        image: registry.access.redhat.com/ubi10/python-312-minimal@sha256:7a3ccd58d8a660d782e8705585aaea2ffe2f2a5d3285507a265dae7d0302b233
+        # Every step works in /workspace itself: Tekton creates all step containers at pod
+        # start, and a missing working directory would be created root-owned (box1-docs#14).
+        workingDir: /workspace
+        computeResources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {cpu: "1", memory: 1Gi}
+        env:
+        - name: REVISION
+          value: "$(params.revision)"
+        - name: HOME
+          value: /workspace
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      steps:
+      - name: fetch
+        env:
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: "$(params.git-auth-secret)"
+              key: git-provider-token
+        script: |
+          #!/bin/sh
+          set -eu
+          echo "$REVISION" | grep -Eq '^[a-f0-9]{40}$'
+          untar() {  # untar <archive> <dir>: strip the top directory; the image has no tar or gzip
+            python3 - "$1" "$2" <<'PY'
+          import sys, tarfile
+          src, dst = sys.argv[1], sys.argv[2]
+          with tarfile.open(src) as t:
+              members = []
+              for m in t.getmembers():
+                  parts = m.name.split("/", 1)
+                  if len(parts) == 2 and parts[1]:
+                      m.name = parts[1]
+                      members.append(m)
+              t.extractall(dst, members=members, filter="data")
+          PY
+          }
+          mkdir -p source
+          curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -o /workspace/src.tgz \
+            "https://api.github.com/repos/box1-org/box1-ops-erp-simulator/tarball/$REVISION"
+          untar /workspace/src.tgz source
+          sha=$(sed -n 's/^commit=//p' source/contracts.lock)
+          echo "$sha" | grep -Eq '^[a-f0-9]{40}$'
+          mkdir -p source/.contracts
+          curl -fsSL -o /workspace/contracts.tgz "https://codeload.github.com/box1-org/box1-ops-contracts/tar.gz/$sha"
+          untar /workspace/contracts.tgz source/.contracts
+          printf 'Fetched box1-ops-erp-simulator %s with box1-ops-contracts %s\n' "$REVISION" "$sha"
+      - name: test
+        script: |
+          #!/bin/sh
+          set -eu
+          cd /workspace/source
+          python3 -m venv /workspace/venv
+          /workspace/venv/bin/pip install --quiet --require-virtualenv -r requirements-dev.txt
+          /workspace/venv/bin/ruff check src tests
+          /workspace/venv/bin/pytest -q -p no:cacheprovider
+  - name: build
+    runAfter: [erp-test]
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-bootc-build
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: git-auth-secret
+      value: "$(params.git-auth-secret)"
+    - name: source-repo
+      value: box1-org/legacy-erp
+    - name: image-name
+      value: legacy-erp
+    - name: push-image
+      value: 'true'
+    - name: extra-source-repo
+      value: box1-org/box1-ops-erp-simulator
+    - name: extra-source-revision
+      value: "$(tasks.resolve.results.erp-revision)"
+    - name: extra-source-path
+      value: erp-src
+  - name: security
+    runAfter: [build]
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-security-gates
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: image-reference
+      value: "image-registry.openshift-image-registry.svc:5000/box1-ci/legacy-erp@$(tasks.build.results.image-digest)"
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: source-revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: source-repository
+      value: box1-org/legacy-erp
+    - name: application-name
+      value: legacy-erp
+    - name: pipeline-run
+      value: "$(context.pipelineRun.name)"
+    - name: enforcement
+      value: "$(params.security-gates)"
+    - name: rhtpa-secret
+      value: rhtpa-ci
+    - name: rhacs-secret
+      value: rhacs-ci
+  - name: disk
+    runAfter: [security]
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-bootc-disk
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: image-name
+      value: legacy-erp
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: channel
+      value: development
+  - name: current
+    runAfter: [disk]
+    params:
+    - name: os-revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: erp-revision
+      value: "$(tasks.resolve.results.erp-revision)"
+    - name: git-auth-secret
+      value: "$(params.git-auth-secret)"
+    taskSpec:
+      params:
+      - name: os-revision
+      - name: erp-revision
+      - name: git-auth-secret
+      results:
+      - name: current
+        description: "true if both mains still point at the commits this run built."
+      steps:
+      - name: check
+        image: registry.access.redhat.com/ubi10/python-312-minimal@sha256:7a3ccd58d8a660d782e8705585aaea2ffe2f2a5d3285507a265dae7d0302b233
+        computeResources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 128Mi}
+        env:
+        - name: OS_REVISION
+          value: "$(params.os-revision)"
+        - name: ERP_REVISION
+          value: "$(params.erp-revision)"
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: "$(params.git-auth-secret)"
+              key: git-provider-token
+        script: |
+          #!/usr/bin/env python3
+          import json, os, urllib.request
+          def head(repo):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/commits/main',
+                  headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)['sha']
+          current=True
+          for repo,built in [('box1-org/legacy-erp',os.environ['OS_REVISION']),
+                             ('box1-org/box1-ops-erp-simulator',os.environ['ERP_REVISION'])]:
+              now=head(repo)
+              if now!=built:
+                  current=False
+                  print(repo+' main moved '+built+' -> '+now+'; a newer run promotes, this one stops here.')
+          open('/tekton/results/current','w').write('true' if current else 'false')
+          if current: print('Both repositories still at the built commits.')
+  - name: promote
+    runAfter: [current]
+    when:
+    - input: "$(tasks.current.results.current)"
+      operator: in
+      values: ['true']
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-gitops-promote
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: git-auth-secret
+      value: "$(params.git-auth-secret)"
+    - name: environment
+      value: development
+    - name: pipeline-run
+      value: "$(context.pipelineRun.name)"
+    - name: application-name
+      value: legacy-erp
+    - name: workload-profile
+      value: virtual-machine
+    - name: disk-digest
+      value: "$(tasks.disk.results.disk-digest)"
+  - name: channel
+    runAfter: [promote]
+    when:
+    - input: "$(tasks.promote.results.promoted)"
+      operator: in
+      values: ['true']
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-bootc-channel
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: image-name
+      value: legacy-erp
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: channel
+      value: development
+  - name: deploy
+    runAfter: [channel]
+    when:
+    - input: "$(tasks.promote.results.promoted)"
+      operator: in
+      values: ['true']
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-bootc-apply
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: application-name
+      value: legacy-erp
+    - name: application-namespace
+      value: legacy-erp-dev
+    - name: ssh-user
+      value: box1-deploy
+    - name: ssh-key-secret
+      value: legacy-erp-deploy-ssh
+    - name: expected-target
+      value: box1-erp.target
+    - name: expected-units
+      value: "box1-erp-worker.service box1-erp-tui@ttyS0.service"
+  - name: smoke
+    runAfter: [deploy]
+    when:
+    - input: "$(tasks.promote.results.promoted)"
+      operator: in
+      values: ['true']
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: box1-vm-smoke
+      - name: namespace
+        value: box1-ci
+    params:
+    - name: revision
+      value: "$(tasks.resolve.results.os-revision)"
+    - name: image-digest
+      value: "$(tasks.build.results.image-digest)"
+    - name: application-name
+      value: legacy-erp
+    - name: application-namespace
+      value: legacy-erp-dev
+  results:
+  - name: os-revision
+    value: "$(tasks.resolve.results.os-revision)"
+  - name: erp-revision
+    value: "$(tasks.resolve.results.erp-revision)"
+  - name: image-digest
+    value: "$(tasks.build.results.image-digest)"
+  - name: disk-digest
+    value: "$(tasks.disk.results.disk-digest)"
+  - name: gitops-pr
+    value: "$(tasks.promote.results.pr-url)"
+  - name: gitops-revision
+    value: "$(tasks.promote.results.gitops-revision)"
+  - name: booted-digest
+    value: "$(tasks.deploy.results.booted-digest)"
+  - name: rhacs-url
+    value: "$(tasks.security.results.rhacs-url)"
+  - name: rhtpa-sbom-url
+    value: "$(tasks.security.results.rhtpa-sbom-url)"
