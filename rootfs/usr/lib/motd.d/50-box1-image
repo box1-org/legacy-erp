@@ -1,5 +1,6 @@
-legacy-erp: RHEL 10 image mode VM (box1 golden path). The OS is immutable;
-change it through Git, and apply approved releases with:
-  sudo bootc upgrade --check     # is a newer approved image available?
-  sudo bootc upgrade --apply     # stage it and reboot
+legacy-erp: RHEL 10 image mode VM running the box1 legacy ERP appliance.
+The OS is immutable; change it through Git (legacy-erp or box1-ops-erp-simulator).
+The release pipeline applies approved images itself. By hand:
   sudo bootc status              # booted / staged / rollback images
+  sudo bootc rollback --apply    # boot the previous image (ERP data volume untouched)
+  sudo systemctl restart box1-erp-worker | box1-erp-tui@ttyS0

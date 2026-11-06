@@ -1,0 +1,13 @@
+# Give a brand-new, blank ERP data disk a filesystem. Never touches a disk that
+# carries any signature (see /usr/libexec/box1-erp/format-data-disk).
+[Unit]
+Description=Format a blank box1 ERP data disk
+DefaultDependencies=no
+BindsTo=dev-disk-by\x2did-virtio\x2derpdata.device
+After=dev-disk-by\x2did-virtio\x2derpdata.device
+Before=var-srv-box1\x2derp.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/box1-erp/format-data-disk
