@@ -1,0 +1,5 @@
+site_name: legacy-erp
+nav:
+  - Overview: index.md
+plugins:
+  - techdocs-core

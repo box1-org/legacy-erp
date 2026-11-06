@@ -1,0 +1,27 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: legacy-erp
+  description: "The ERP solution that the company depends on"
+  annotations:
+    github.com/project-slug: box1-org/legacy-erp
+    backstage.io/kubernetes-id: legacy-erp
+    backstage.io/techdocs-ref: dir:.
+    backstage.io/source-location: url:https://github.com/box1-org/legacy-erp/
+    janus-idp.io/tekton: legacy-erp
+    argocd/instance-name: openshift-gitops
+    argocd/app-selector: backstage.io/kubernetes-id=legacy-erp
+    box1.org/template-version: "1.0.0"
+  tags: [rhel, bootc, image-mode, kubevirt, tekton, gitops]
+  links:
+    - url: https://github.com/box1-org/legacy-erp
+      title: Source Repository
+      icon: github
+    - url: https://console-openshift-console.apps.ocp.box1.org/k8s/ns/legacy-erp-dev/kubevirt.io~v1~VirtualMachine/legacy-erp
+      title: Virtual machine (OpenShift console)
+    - url: https://github.com/box1-org/box1-workloads-dev/tree/main/workloads/legacy-erp
+      title: Desired VM configuration
+spec:
+  type: vm
+  lifecycle: experimental
+  owner: "user:default/mike4263"

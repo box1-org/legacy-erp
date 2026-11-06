@@ -1,0 +1,9 @@
+# Default boot target for legacy-erp. It keeps the normal multi-user system
+# (networking, sshd, getty, qemu-guest-agent) and adds this appliance's services.
+# Add your own units with WantedBy=legacy-erp.target, or list them in Wants=.
+[Unit]
+Description=legacy-erp appliance
+Requires=multi-user.target
+After=multi-user.target
+Wants=legacy-erp-heartbeat.service box1-registry-setup.service
+AllowIsolate=yes
