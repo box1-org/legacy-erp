@@ -1,6 +1,6 @@
 # PR check: build the OS image (bootc container lint runs inside the Containerfile)
-# without pushing. ci-bootc-check can run privileged pods but has no API token and
-# no registry rights.
+# without pushing, with box1-ops-erp-simulator main as erp-src/. ci-bootc-check can
+# run privileged pods but has no API token and no registry rights.
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -29,8 +29,36 @@ spec:
     - name: git-auth-secret
       type: string
     tasks:
-    - name: validate
+    - name: resolve
       retries: 1   # PAC can briefly create the run before its git auth Secret.
+      params:
+      - name: git-auth-secret
+        value: "$(params.git-auth-secret)"
+      taskSpec:
+        params:
+        - name: git-auth-secret
+        results:
+        - name: erp-revision
+        steps:
+        - name: resolve
+          image: registry.access.redhat.com/ubi10/python-312-minimal@sha256:7a3ccd58d8a660d782e8705585aaea2ffe2f2a5d3285507a265dae7d0302b233
+          env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: "$(params.git-auth-secret)"
+                key: git-provider-token
+          script: |
+            #!/usr/bin/env python3
+            import json, os, re, urllib.request
+            req=urllib.request.Request('https://api.github.com/repos/box1-org/box1-ops-erp-simulator/commits/main',
+                headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as r: sha=json.load(r)['sha']
+            assert re.fullmatch('[a-f0-9]{40}',sha)
+            open('$(results.erp-revision.path)','w').write(sha)
+            print('box1-org/box1-ops-erp-simulator main '+sha)
+    - name: validate
+      runAfter: [resolve]
       taskRef:
         resolver: cluster
         params:
@@ -51,3 +79,9 @@ spec:
         value: "legacy-erp"
       - name: push-image
         value: 'false'
+      - name: extra-source-repo
+        value: box1-org/box1-ops-erp-simulator
+      - name: extra-source-revision
+        value: "$(tasks.resolve.results.erp-revision)"
+      - name: extra-source-path
+        value: erp-src

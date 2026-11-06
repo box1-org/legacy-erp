@@ -1,0 +1,15 @@
+# ERP data volume (KubeVirt disk serial "erpdata", PVC legacy-erp-data).
+# /srv is a symlink to var/srv on image mode systems, so the mount uses the real
+# path; /srv/box1-erp resolves to it. If the disk is missing the mount fails after
+# the device timeout, and the ERP worker and console do not start: no ledger is
+# ever created on the root filesystem.
+[Unit]
+Description=box1 ERP data volume
+Requires=box1-erp-data-format.service
+After=box1-erp-data-format.service
+
+[Mount]
+What=/dev/disk/by-id/virtio-erpdata
+Where=/var/srv/box1-erp
+Type=xfs
+Options=defaults,nodev,nosuid

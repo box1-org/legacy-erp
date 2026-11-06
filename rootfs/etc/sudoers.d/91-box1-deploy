@@ -1,0 +1,2 @@
+# The CI deploy identity may only apply the approved image and report status.
+box1-deploy ALL=(root) NOPASSWD: /usr/bin/bootc upgrade --apply, /usr/bin/bootc status --format json

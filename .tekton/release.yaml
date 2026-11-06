@@ -1,11 +1,8 @@
-# Release on push to main:
-#   build    - OS image box1-ci/legacy-erp@digest (box1-bootc-build)
-#   security - TPA SBOM + ACS scan (box1-security-gates, observe)
-#   disk     - containerDisk box1-ci/legacy-erp-disk, for (re)installs (box1-bootc-disk)
-#   promote  - box1-workloads-dev PR recording the OS digest on the VirtualMachine
-#   channel  - after the merge and sync, box1-ci/legacy-erp:development -> digest
-#   smoke    - Argo, VM and guest agent state
-# The running VM applies an approved image with `sudo bootc upgrade --apply`.
+# Release on push to main: run the shared legacy-erp-appliance Pipeline
+# (.tekton/appliance-pipeline.yaml) with this commit and box1-ops-erp-simulator
+# main. box1-ops-erp-simulator pushes run the same Pipeline with the roles
+# swapped. See the pipeline file for its stages; the release ends with the image
+# applied in the running VM (`bootc upgrade --apply`) and verified.
 ---
 apiVersion: tekton.dev/v1
 kind: PipelineRun
@@ -19,13 +16,17 @@ metadata:
     pipelinesascode.tekton.dev/target-namespace: box1-ci
     pipelinesascode.tekton.dev/max-keep-runs: '10'
 spec:
+  pipelineRef:
+    name: legacy-erp-appliance
   taskRunTemplate:
     serviceAccountName: ci-bootc-release
   timeouts:
-    pipeline: 90m
+    pipeline: 120m
   params:
-  - name: revision
+  - name: os-revision
     value: "{{revision}}"
+  - name: erp-revision
+    value: main
   - name: git-auth-secret
     value: "{{git_auth_secret}}"
   - name: security-gates
@@ -211,9 +212,17 @@ spec:
     - name: SCAN_OUTPUT
       value: "$(tasks.security.results.SCAN_OUTPUT)"
   taskRunSpecs:
+  - pipelineTaskName: resolve
+    serviceAccountName: ci-test
+  - pipelineTaskName: erp-test
+    serviceAccountName: ci-test
+  - pipelineTaskName: current
+    serviceAccountName: ci-test
   - pipelineTaskName: security
     serviceAccountName: ci-build
   - pipelineTaskName: promote
     serviceAccountName: ci-gitops
+  - pipelineTaskName: deploy
+    serviceAccountName: ci-vm-deploy
   - pipelineTaskName: smoke
     serviceAccountName: ci-observe

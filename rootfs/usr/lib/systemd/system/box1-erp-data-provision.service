@@ -1,0 +1,12 @@
+# Lay out the mounted ERP data volume with the simulator's provision-data-volume.sh.
+# The ledger is initialised only on first provisioning (marker file on the volume);
+# afterwards a missing ledger stays missing and the worker refuses to start.
+[Unit]
+Description=Prepare the box1 ERP data volume
+RequiresMountsFor=/var/srv/box1-erp
+After=systemd-sysusers.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/box1-erp/provision-data
