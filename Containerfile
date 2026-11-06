@@ -62,12 +62,18 @@ RUN install -m0644 /tmp/box1-erp/packaging/sysusers-box1-erp.conf /usr/lib/sysus
 
 # virt_qemu_ga_manage_ssh lets qemu-guest-agent write ~/.ssh/authorized_keys, which
 # KubeVirt accessCredentials needs; it is off by default in RHEL.
+# The ERP venv's bin/ is labelled bin_t (default: lib_t) so systemd starts the
+# worker and console as unconfined_service_t, like any packaged service. From
+# lib_t they stayed in init_t, which may not create files in the data volume
+# (avc denied create ledger.lock, box1-docs#25).
 RUN rm -rf /run/secrets/entitlement /run/box1-repos /run/rhsm \
  && printf 'NAME=%s\nREVISION=%s\nERP_REVISION=%s\n' "legacy-erp" "${SOURCE_REVISION}" "${EXTRA_SOURCE_REVISION}" > /usr/lib/box1-image-release \
  && chmod 0755 /usr/libexec/box1/registry-setup /usr/libexec/box1-erp/format-data-disk /usr/libexec/box1-erp/provision-data \
  && chmod 0440 /etc/sudoers.d/90-box1-wheel /etc/sudoers.d/91-box1-deploy \
  && visudo -cf /etc/sudoers.d/90-box1-wheel && visudo -cf /etc/sudoers.d/91-box1-deploy \
  && setsebool -P virt_qemu_ga_manage_ssh on \
+ && semanage fcontext -a -t bin_t '/usr/lib/box1-erp/venv/bin(/.*)?' \
+ && restorecon -R /usr/lib/box1-erp/venv/bin \
  && systemctl set-default box1-erp.target \
  && systemctl mask serial-getty@ttyS0.service \
  && systemctl enable box1-registry-setup.service \
