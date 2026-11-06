@@ -1,0 +1,8 @@
+{
+  "id": "3547a0ad-d28a-4ddc-a876-66a90779ffa1",
+  "name": "legacy-erp",
+  "namespace": "legacy-erp-dev",
+  "owner": "user:default/mike4263",
+  "templateVersion": "1.0.0",
+  "profile": "virtual-machine"
+}
