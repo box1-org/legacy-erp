@@ -14,5 +14,5 @@ if [ "$(head -c 1048576 "$DEV" | tr -d '\000' | head -c 1 | wc -c)" -ne 0 ]; the
   echo "ERP data disk has no known signature but is not blank; refusing to format" >&2
   exit 1
 fi
-mkfs.xfs -q -L box1-erp-data "$DEV"
-echo "Formatted blank ERP data disk $DEV (xfs, label box1-erp-data)"
+mkfs.xfs -q -L box1erpdata "$DEV"
+echo "Formatted blank ERP data disk $DEV (xfs, label box1erpdata)"
