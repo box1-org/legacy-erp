@@ -206,6 +206,10 @@ spec:
       value: "$(tasks.security.results.rhacs-url)"
     - name: rhtpa-sbom-url
       value: "$(tasks.security.results.rhtpa-sbom-url)"
+    # Read by the OpenShift Pipelines console Vulnerabilities column. Emitted
+    # only when box1-security-gates produced a scan summary; otherwise "-".
+    - name: SCAN_OUTPUT
+      value: "$(tasks.security.results.SCAN_OUTPUT)"
   taskRunSpecs:
   - pipelineTaskName: security
     serviceAccountName: ci-build
