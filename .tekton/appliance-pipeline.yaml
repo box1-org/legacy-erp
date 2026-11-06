@@ -369,7 +369,7 @@ spec:
     - name: expected-target
       value: box1-erp.target
     - name: expected-units
-      value: "box1-erp-worker.service box1-erp-tui@ttyS0.service"
+      value: "box1-erp-worker.service box1-erp-tui@ttyS0.service box1-erp-sftpd.service"
   - name: smoke
     runAfter: [deploy]
     when:

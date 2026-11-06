@@ -66,16 +66,21 @@ RUN install -m0644 /tmp/box1-erp/packaging/sysusers-box1-erp.conf /usr/lib/sysus
 # worker and console as unconfined_service_t, like any packaged service. From
 # lib_t they stayed in init_t, which may not create files in the data volume
 # (avc denied create ledger.lock, box1-docs#25).
-# Both policy changes go in ONE semanage transaction: a second commit in the same
+# The SFTP endpoint adds its port (2222) and its host-key path on the data volume.
+# All policy changes go in ONE semanage transaction: a second commit in the same
 # layer fails on the cluster's buildah overlay storage (rename of
 # /etc/selinux/targeted/active: Directory not empty).
 RUN rm -rf /run/secrets/entitlement /run/box1-repos /run/rhsm \
  && printf 'NAME=%s\nREVISION=%s\nERP_REVISION=%s\n' "legacy-erp" "${SOURCE_REVISION}" "${EXTRA_SOURCE_REVISION}" > /usr/lib/box1-image-release \
  && chmod 0755 /usr/libexec/box1/registry-setup /usr/libexec/box1-erp/format-data-disk /usr/libexec/box1-erp/provision-data \
  && chmod 0440 /etc/sudoers.d/90-box1-wheel /etc/sudoers.d/91-box1-deploy \
+ && chown -R root:root /etc/ssh/authorized_keys && chmod 0755 /etc/ssh/authorized_keys \
+ && chmod 0644 /etc/ssh/authorized_keys/erpsftp /etc/ssh/sshd_config.box1-sftp /etc/ssh/sshd_config.d/40-box1-erp-sftp-deny.conf \
  && visudo -cf /etc/sudoers.d/90-box1-wheel && visudo -cf /etc/sudoers.d/91-box1-deploy \
  && printf '%s\n' 'boolean -m -1 virt_qemu_ga_manage_ssh' \
-     "fcontext -a -t bin_t '/usr/lib/box1-erp/venv/bin(/.*)?'" | semanage import \
+     "fcontext -a -t bin_t '/usr/lib/box1-erp/venv/bin(/.*)?'" \
+     "fcontext -a -t sshd_key_t '/var/srv/box1-erp/ssh(/.*)?'" \
+     'port -a -t ssh_port_t -p tcp 2222' | semanage import \
  && semanage boolean -l -C | grep -Eq '^virt_qemu_ga_manage_ssh +\(on' \
  && restorecon -R /usr/lib/box1-erp/venv/bin \
  && systemctl set-default box1-erp.target \
@@ -84,7 +89,7 @@ RUN rm -rf /run/secrets/entitlement /run/box1-repos /run/rhsm \
  && systemctl disable bootc-fetch-apply-updates.timer \
  && rpm -q qemu-guest-agent \
  && /usr/bin/box1-erp --help >/dev/null \
- && systemd-analyze verify --man=no box1-erp.target box1-erp-worker.service box1-erp-tui@ttyS0.service box1-erp-data-provision.service 'var-srv-box1\x2derp.mount' \
+ && systemd-analyze verify --man=no box1-erp.target box1-erp-worker.service box1-erp-tui@ttyS0.service box1-erp-data-provision.service box1-erp-sftpd.service 'var-srv-box1\x2derp.mount' \
  && bootc container lint
 
 LABEL org.opencontainers.image.source="https://github.com/box1-org/legacy-erp" \

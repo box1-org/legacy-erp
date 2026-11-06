@@ -1,6 +1,7 @@
 # Default boot target of the legacy ERP appliance (box1-docs#25). It keeps the
 # normal multi-user system (networking, sshd, qemu-guest-agent, admin access) and
-# adds the ERP worker and the operator console on the serial console, ttyS0.
+# adds the ERP worker, the operator console on the serial console (ttyS0), and
+# the SFTP endpoint for the fulfillment adapter (port 2222).
 # serial-getty@ttyS0 is masked in the image so only the ERP console owns ttyS0.
 # Recovery: SSH as an admin, or `systemctl isolate multi-user.target`, or boot
 # with `systemd.unit=multi-user.target` / `rescue.target` from the boot menu.
@@ -8,5 +9,5 @@
 Description=box1 legacy ERP appliance
 Requires=multi-user.target
 After=multi-user.target
-Wants=box1-erp-worker.service box1-erp-tui@ttyS0.service box1-registry-setup.service
+Wants=box1-erp-worker.service box1-erp-tui@ttyS0.service box1-erp-sftpd.service box1-registry-setup.service
 AllowIsolate=yes

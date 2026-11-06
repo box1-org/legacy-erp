@@ -1,0 +1,34 @@
+# SFTP-only sshd for the fulfillment adapter (box1-docs#25), run by
+# box1-erp-sftpd.service on port 2222 (Service legacy-erp-sftp:22 in
+# legacy-erp-dev). Separate from the admin sshd on port 22, which never depends
+# on the ERP data volume. Follows box1-ops-erp-simulator's
+# packaging/sshd-box1-erp-sftp.conf.example with real paths (/srv -> var/srv).
+Include /etc/crypto-policies/back-ends/opensshserver.config
+
+Port 2222
+ListenAddress 0.0.0.0
+PidFile /run/box1-erp-sftpd.pid
+SyslogFacility AUTHPRIV
+LogLevel INFO
+
+# Host identity lives on the data volume, so a rebuilt guest keeps it and the
+# adapter's known_hosts stays valid. Created once by box1-erp-data-provision.
+HostKey /var/srv/box1-erp/ssh/ssh_host_ed25519_key
+
+AllowUsers erpsftp
+PermitRootLogin no
+UsePAM yes
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+# Root-owned keys, outside the chroot and the account's home.
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+
+Subsystem sftp internal-sftp
+ChrootDirectory /var/srv/box1-erp/exchange
+ForceCommand internal-sftp -u 0007
+PermitTTY no
+DisableForwarding yes
+PermitTunnel no
+PermitUserRC no
