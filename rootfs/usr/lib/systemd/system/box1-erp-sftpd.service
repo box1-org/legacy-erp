@@ -1,0 +1,18 @@
+# SFTP endpoint for the fulfillment adapter (box1-docs#25). Requires the ERP data
+# volume, so an upload can never land on the root filesystem; the admin sshd on
+# port 22 does not, so recovery works without the volume.
+[Unit]
+Description=box1 ERP SFTP endpoint for the fulfillment adapter (port 2222)
+Documentation=man:sshd(8) man:sshd_config(5)
+RequiresMountsFor=/var/srv/box1-erp
+Requires=box1-erp-data-provision.service
+After=network.target box1-erp-data-provision.service
+
+[Service]
+Type=notify
+ExecStartPre=/usr/sbin/sshd -t -f /etc/ssh/sshd_config.box1-sftp
+ExecStart=/usr/sbin/sshd -D -f /etc/ssh/sshd_config.box1-sftp
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+Restart=on-failure
+RestartSec=10s

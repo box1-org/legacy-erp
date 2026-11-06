@@ -12,4 +12,12 @@ else
   date -u +%Y-%m-%dT%H:%M:%SZ > "$MARKER"
   echo "First provisioning: ledger initialised"
 fi
+# SFTP host identity (box1-erp-sftpd): created once, kept across OS updates and
+# guest-disk rebuilds so the adapter's known_hosts stays valid. Never regenerated;
+# rotation follows the adapter runbook.
+install -d -m 0700 -o root -g root "$ROOT/ssh"
+if [ ! -e "$ROOT/ssh/ssh_host_ed25519_key" ]; then
+  ssh-keygen -q -t ed25519 -N '' -C "legacy-erp sftp" -f "$ROOT/ssh/ssh_host_ed25519_key"
+  echo "Created SFTP host key: $(ssh-keygen -lf "$ROOT/ssh/ssh_host_ed25519_key.pub")"
+fi
 restorecon -R "$ROOT"
