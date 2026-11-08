@@ -25,6 +25,7 @@ spec:
   type: vm
   lifecycle: experimental
   owner: "user:default/mike"
+  system: box1-operations
   providesApis:
     - erp1-file-exchange
   dependsOn:
@@ -50,5 +51,6 @@ spec:
   type: erp1-sftp
   lifecycle: experimental
   owner: "user:default/mike"
+  system: box1-operations
   definition:
     $text: https://github.com/box1-org/box1-ops-contracts/blob/main/legacy/erp-file/v1/SPEC.md
