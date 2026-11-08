@@ -25,3 +25,30 @@ spec:
   type: vm
   lifecycle: experimental
   owner: "user:default/mike4263"
+  providesApis:
+    - erp1-file-exchange
+  dependsOn:
+    - component:box1-ops-erp-simulator
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: erp1-file-exchange
+  title: ERP1 file exchange (SFTP)
+  description: >-
+    Pipe-delimited ERP1 v1 files exchanged over SFTP (inbound/ and outbound/) with the
+    legacy ERP appliance. Served in-cluster by Service legacy-erp-sftp.legacy-erp-dev.svc:22
+    (target 2222, account erpsftp); only the fulfillment adapter may connect.
+  tags: [sftp, erp1, legacy, file-exchange]
+  links:
+    - url: https://github.com/box1-org/box1-ops-contracts/tree/main/legacy/erp-file/v1
+      title: ERP1 v1 protocol and golden fixtures
+      icon: docs
+    - url: https://github.com/box1-org/box1-workloads-dev/blob/main/workloads/legacy-erp/sftp.yaml
+      title: SFTP Service and NetworkPolicy
+spec:
+  type: erp1-sftp
+  lifecycle: experimental
+  owner: "user:default/mike4263"
+  definition:
+    $text: https://github.com/box1-org/box1-ops-contracts/blob/main/legacy/erp-file/v1/SPEC.md
